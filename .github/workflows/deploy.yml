@@ -1,0 +1,42 @@
+name: Deploy to DigitalOcean Droplet
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Set up SSH Agent
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy via SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          REPO_URL: ${{ secrets.REPO_URL }}
+          PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -A -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'EOF'
+            cd $PROJECT_PATH
+            # Add GitHub to known_hosts so that git doesn't complain.
+            mkdir -p ~/.ssh
+            ssh-keyscan github.com >> ~/.ssh/known_hosts
+            # Ensure the remote URL uses SSH.
+            git remote set-url origin $REPO_URL
+            git pull origin main
+            # Activate the virtual environment.
+            source venv/bin/activate
+            # Install dependencies.
+            pip install -r requirements.txt
+            # Restart the FastAPI service.
+            sudo systemctl restart fastapi
+          EOF

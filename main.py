@@ -4,7 +4,7 @@ from app.api.v1.crawler import router as crawler_router
 
 app = FastAPI(
     title="SimpleCrawl",
-    description="An API to crawl websites and extract data",
+    description="An API to crawl websites and extract LLM & Agent Friendly data",
     version="1.0.0"
 )
 

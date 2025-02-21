@@ -25,7 +25,7 @@ jobs:
           PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          ssh -A -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'EOF'
+          ssh -A -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << EOF
             cd $PROJECT_PATH
             # Add GitHub to known_hosts so that git doesn't complain.
             mkdir -p ~/.ssh

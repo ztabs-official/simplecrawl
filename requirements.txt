@@ -11,4 +11,4 @@ starlette==0.45.3
 typing_extensions==4.12.2
 uvicorn==0.34.0
 crawl4ai==0.4.3b2
-playwright==1.42.0
+playwright==1.49.0

@@ -1,2 +1,13 @@
 github-actions-deploy-key*
 github-actions-deploy-key*
+.cursor/*
+run_tests.sh
+ideas.md
+app/__pycache__/*
+app/services/__pycache__/*
+app/tests/__pycache__/*
+app/api/__pycache__/*
+app/api/v1/__pycache__/*
+app/core/__pycache__/*
+app/models/__pycache__/*
+__pycache__/*

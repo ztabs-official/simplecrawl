@@ -1,6 +1,6 @@
 # main.py
 from fastapi import FastAPI
-from app.api.v1.crawler import router as crawler_router
+from app.api.v1.scrape import router as scrape_router
 
 app = FastAPI(
     title="SimpleCrawl",
@@ -8,10 +8,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
+app.include_router(scrape_router)
+
 @app.get("/")
 async def read_root():
     return {"message": "SimpleCrawl API is running!"}
-
-
-# Include routers
-app.include_router(crawler_router)

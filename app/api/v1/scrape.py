@@ -3,7 +3,7 @@ from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict, Any
 from app.services.scraper import ScraperService, ScrapeOptions, PageAction
 
-router = APIRouter(prefix="/v1", tags=["scraper"])
+router = APIRouter(tags=["scraper"])
 
 class ScrapeRequest(BaseModel):
     url: HttpUrl
@@ -82,6 +82,7 @@ async def scrape_url(
     Returns:
         Scraped content in requested formats with metadata and action results
     """
+    print(f"DEBUG API: Received request to scrape {request.url}")
     try:
         options = ScrapeOptions(
             formats=request.formats,
@@ -90,30 +91,16 @@ async def scrape_url(
             actions=request.actions
         )
         
-        result = await scraper.scrape_url(str(request.url), options)
+        print(f"DEBUG API: Created options {options}")
+        result = await scraper.scrape_url(url=str(request.url), options=options)
+        print(f"DEBUG API: Got result {type(result)}")
         
-        if not result:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to get response from scraper service"
-            )
-            
-        if isinstance(result, dict):
-            if not result.get("success", False):
-                error_message = result.get("error", "Unknown error")
-                raise HTTPException(
-                    status_code=500,
-                    detail=error_message
-                )
-            return result
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="Invalid response format from scraper service"
-            )
-            
+        if not result.get("success", False):
+            error_msg = result.get("error", "Unknown error")
+            print(f"DEBUG API: Error in scrape: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        return result
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        ) 
+        print(f"DEBUG API: Exception in scrape_url: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)) 

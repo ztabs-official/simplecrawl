@@ -1,6 +1,9 @@
 from typing import List, Dict, Optional, Union
 from pydantic import BaseModel
 from crawl4ai import AsyncWebCrawler, CrawlResult
+# Try importing from async_configs which is the correct location in v0.4.0
+from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig, CacheMode
+
 import base64
 from datetime import datetime
 import asyncio
@@ -49,7 +52,9 @@ class ScrapeOptions(BaseModel):
 
 class ScraperService:
     def __init__(self):
-        self.crawler = AsyncWebCrawler()
+        # We'll create the crawler as needed rather than initializing it once
+        # since it needs to be used within an async context manager
+        pass
 
     async def scrape_url(
         self, 
@@ -70,7 +75,7 @@ class ScraperService:
             print(f"DEBUG: Starting scrape_url for {url}")
             options = options or ScrapeOptions()
             
-            # Initialize crawler with options
+            # Initialize crawler with options - keep backward compatibility
             crawler_config = {
                 "parse_javascript": True,  # For JavaScript rendered content
                 "follow_redirects": True,
@@ -90,22 +95,39 @@ class ScraperService:
                 print(f"DEBUG: Executing actions: {options.actions}")
                 action_results = await self._execute_actions(url, options.actions)
 
-            # Perform the crawl
+            # Perform the crawl using a new crawler instance within an async context manager
             print(f"DEBUG: Running crawler with config: {crawler_config}")
-            result: CrawlResult = await self.crawler.arun(
-                url=url,
-                **crawler_config
-            )
+            async with AsyncWebCrawler() as crawler:
+                result = await crawler.arun(
+                    url=url,
+                    **crawler_config
+                )
 
-            # Process the results based on requested formats
-            print(f"DEBUG: Processing formats: {options.formats}")
-            scraped_data = await self._process_formats(result, options, action_results)
-            
-            print(f"DEBUG: Returning success with data: {type(scraped_data)}")
-            return {
-                "success": True,
-                "data": scraped_data
-            }
+                # Check if result is valid
+                if not result:
+                    print("DEBUG: Crawler returned empty result")
+                    return {
+                        "success": False,
+                        "error": "Crawler returned empty result"
+                    }
+
+                # Check success status from result
+                if hasattr(result, 'success') and not result.success:
+                    print(f"DEBUG: Crawl failed with status: {getattr(result, 'status_code', 'unknown')}")
+                    return {
+                        "success": False,
+                        "error": getattr(result, 'error_message', 'Unknown error')
+                    }
+
+                # Process the results based on requested formats
+                print(f"DEBUG: Processing formats: {options.formats}")
+                scraped_data = await self._process_formats(result, options, action_results)
+                
+                print(f"DEBUG: Returning success with data: {type(scraped_data)}")
+                return {
+                    "success": True,
+                    "data": scraped_data
+                }
             
         except Exception as e:
             print(f"DEBUG: Error in scrape_url: {str(e)}")
@@ -123,43 +145,46 @@ class ScraperService:
         result = ActionResult()
         
         try:
-            # Use the crawler's arun method to get the page content
-            page_result = await self.crawler.arun(url)
-            
-            for action in actions:
-                if action.type == "wait":
-                    # Simulate wait by not doing anything
-                    await asyncio.sleep(action.milliseconds / 1000 if action.milliseconds else 1)
-                elif action.type == "screenshot":
-                    try:
-                        # Take screenshot using crawler's screenshot capability
-                        screenshot = await self._take_screenshot(url, full_page=False)
-                        if screenshot:
-                            result.screenshots.append(screenshot)
-                    except Exception as e:
-                        print(f"DEBUG: Screenshot action error: {str(e)}")
-                elif action.type == "scrape":
-                    try:
-                        # Get the current page content
-                        current_result = await self.crawler.arun(url)
-                        if current_result and hasattr(current_result, 'content'):
+            # Use a new crawler instance within an async context manager
+            async with AsyncWebCrawler() as crawler:
+                # Use the crawler's arun method to get the page content
+                page_result = await crawler.arun(url)
+                
+                for action in actions:
+                    if action.type == "wait":
+                        # Simulate wait by not doing anything
+                        await asyncio.sleep(action.milliseconds / 1000 if action.milliseconds else 1)
+                    elif action.type == "screenshot":
+                        try:
+                            # Take screenshot using crawler's screenshot capability
+                            screenshot = await self._take_screenshot(url, full_page=False)
+                            if screenshot:
+                                result.screenshots.append(screenshot)
+                        except Exception as e:
+                            print(f"DEBUG: Screenshot action error: {str(e)}")
+                    elif action.type == "scrape":
+                        try:
+                            # Get the current page content with a new crawler
+                            async with AsyncWebCrawler() as action_crawler:
+                                current_result = await action_crawler.arun(url)
+                                if current_result and hasattr(current_result, 'content'):
+                                    result.scrapes.append({
+                                        "url": url,
+                                        "html": current_result.content
+                                    })
+                                else:
+                                    result.scrapes.append({
+                                        "url": url,
+                                        "html": ""
+                                    })
+                        except Exception as e:
+                            print(f"DEBUG: Scrape action error: {str(e)}")
                             result.scrapes.append({
                                 "url": url,
-                                "html": current_result.content
+                                "html": f"Error: {str(e)}"
                             })
-                        else:
-                            result.scrapes.append({
-                                "url": url,
-                                "html": ""
-                            })
-                    except Exception as e:
-                        print(f"DEBUG: Scrape action error: {str(e)}")
-                        result.scrapes.append({
-                            "url": url,
-                            "html": f"Error: {str(e)}"
-                        })
-                else:
-                    print(f"DEBUG: Unsupported action type: {action.type}")
+                    else:
+                        print(f"DEBUG: Unsupported action type: {action.type}")
             
             return result
         except Exception as e:
@@ -186,7 +211,7 @@ class ScraperService:
                 source_url = str(result.url)
             
             # For status_code, ensure it's an integer
-            status_code = 500
+            status_code = 200  # Default to 200 if successful
             if result and hasattr(result, 'status_code'):
                 if isinstance(result.status_code, int):
                     status_code = result.status_code
@@ -212,13 +237,45 @@ class ScraperService:
             # Process each requested format
             for fmt in options.formats:
                 if fmt == "markdown" and result:
-                    data.markdown = result.to_markdown() if hasattr(result, 'to_markdown') else None
+                    # Handle markdown - based on Crawl4AI documentation
+                    if hasattr(result, 'markdown'):
+                        data.markdown = result.markdown
+                    elif hasattr(result, 'to_markdown'):
+                        data.markdown = result.to_markdown()
+                    else:
+                        print("DEBUG: No markdown available in result")
+                        
                 elif fmt == "html" and result:
-                    data.html = result.content if hasattr(result, 'content') else None
+                    # Handle HTML - based on Crawl4AI documentation
+                    if hasattr(result, 'content'):
+                        data.html = result.content
+                    elif hasattr(result, 'html'):
+                        data.html = result.html
+                    else:
+                        print("DEBUG: No HTML content available in result")
+                        
                 elif fmt == "rawHtml" and result:
-                    data.raw_html = result.raw_content if hasattr(result, 'raw_content') else None
+                    # Handle raw HTML
+                    if hasattr(result, 'raw_content'):
+                        data.raw_html = result.raw_content
+                    elif hasattr(result, 'raw_html'):
+                        data.raw_html = result.raw_html
+                    else:
+                        print("DEBUG: No raw HTML content available in result")
+                        
                 elif fmt == "links" and result:
-                    data.links = result.links if hasattr(result, 'links') else []
+                    # Handle links
+                    if hasattr(result, 'links'):
+                        # Convert to list if necessary
+                        links = result.links
+                        if isinstance(links, dict):
+                            data.links = list(links.values()) if links else []
+                        else:
+                            data.links = links if links else []
+                    else:
+                        print("DEBUG: No links available in result")
+                        data.links = []
+                        
                 elif fmt.startswith("screenshot"):
                     # Take screenshot if not already taken through actions
                     if not (action_results and action_results.screenshots):
@@ -230,6 +287,7 @@ class ScraperService:
                             data.screenshot = screenshot
                         except Exception as e:
                             print(f"DEBUG: Screenshot error: {str(e)}")
+                            
                 elif fmt == "json" and options.json_options and result:
                     try:
                         data.json = await self._extract_structured_data(
@@ -255,20 +313,43 @@ class ScraperService:
                 )
             )
 
-    async def _take_screenshot(self, url: str, full_page: bool = False) -> str:
+    async def _take_screenshot(
+        self, 
+        url: str, 
+        full_page: bool = False
+    ) -> str:
         """Take a screenshot of the page"""
         try:
-            # Use arun to get a valid result instead of get_page
-            result = await self.crawler.arun(url)
-            if hasattr(result, 'screenshot'):
-                screenshot = await result.screenshot(full_page=full_page)
-                return base64.b64encode(screenshot).decode()
-            elif hasattr(self.crawler, 'screenshot'):
-                screenshot = await self.crawler.screenshot(url, full_page=full_page)
-                return base64.b64encode(screenshot).decode()
-            else:
-                print("DEBUG: No screenshot capability found")
-                return ""
+            # Use a fresh crawler instance within an async context manager
+            async with AsyncWebCrawler() as crawler:
+                try:
+                    # Try to get a screenshot via direct crawler method
+                    if hasattr(crawler, 'screenshot'):
+                        screenshot = await crawler.screenshot(url, full_page=full_page)
+                        if screenshot:
+                            return base64.b64encode(screenshot).decode()
+                except Exception as e:
+                    print(f"DEBUG: Error with primary screenshot method: {str(e)}")
+                
+                try:
+                    # Try to get a screenshot via crawl result
+                    result = await crawler.arun(url)
+                    
+                    # Try various screenshot methods based on Crawl4AI docs
+                    if hasattr(result, 'screenshot'):
+                        if callable(result.screenshot):
+                            screenshot = await result.screenshot(full_page=full_page)
+                            return base64.b64encode(screenshot).decode()
+                        else:
+                            # If it's already a property containing binary data
+                            screenshot = result.screenshot
+                            return base64.b64encode(screenshot).decode()
+                except Exception as e:
+                    print(f"DEBUG: Error with result screenshot method: {str(e)}")
+            
+            # If we get here, no screenshot capability found
+            print("DEBUG: No screenshot capability found")
+            return ""
         except Exception as e:
             print(f"DEBUG: Error taking screenshot: {str(e)}")
             return ""
@@ -291,20 +372,32 @@ class ScraperService:
             if "schema" in json_options:
                 # Use schema-based extraction
                 try:
-                    return await self.crawler.extract_structured(
-                        result.content,
-                        json_options["schema"]
-                    )
+                    # Check if extract_structured is a method of result or crawler
+                    if hasattr(result, 'extract_structured'):
+                        return await result.extract_structured(json_options["schema"])
+                    else:
+                        # Try using crawler's method
+                        async with AsyncWebCrawler() as new_crawler:
+                            return await new_crawler.extract_structured(
+                                result.content,
+                                json_options["schema"]
+                            )
                 except Exception as e:
                     print(f"DEBUG: Schema extraction error: {str(e)}")
                     return {}
             elif "prompt" in json_options:
                 # Use prompt-based extraction
                 try:
-                    return await self.crawler.extract_with_prompt(
-                        result.content,
-                        json_options["prompt"]
-                    )
+                    # Check if extract_with_prompt is a method of result or crawler
+                    if hasattr(result, 'extract_with_prompt'):
+                        return await result.extract_with_prompt(json_options["prompt"])
+                    else:
+                        # Try using crawler's method
+                        async with AsyncWebCrawler() as new_crawler:
+                            return await new_crawler.extract_with_prompt(
+                                result.content,
+                                json_options["prompt"]
+                            )
                 except Exception as e:
                     print(f"DEBUG: Prompt extraction error: {str(e)}")
                     return {}

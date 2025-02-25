@@ -1,2 +1,5 @@
 github-actions-deploy-key*
 github-actions-deploy-key*
+.cursor/*
+run_tests.sh
+ideas.md
